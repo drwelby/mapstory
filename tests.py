@@ -2,6 +2,7 @@ from django.test import TestCase
 from django.test.client import Client
 from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
+from django.core.urlresolvers import reverse
 
 from geonode.maps.models import Layer
 from geonode.maps.models import Map
@@ -10,6 +11,7 @@ from geonode.maps.models import Thumbnail
 from geonode.simplesearch import models as simplesearch
 from mapstory import social_signals # this just needs activating but is not used
 from mapstory import forms
+from mapstory.models import Annotation
 from mapstory.models import UserActivity
 from mapstory.models import ProfileIncomplete
 from mapstory.models import audit_layer_metadata
@@ -22,8 +24,10 @@ from dialogos.models import Comment
 from mailer import engine as email_engine
 
 from datetime import timedelta
+import json
 import logging
 import re
+import StringIO
 
 # these can just get whacked
 simplesearch.map_updated = lambda **kw: None
@@ -274,3 +278,111 @@ class ContactDetailTests(TestCase):
         # and email applied to both user and profile
         self.assertEqual(new_email, u.email)
         self.assertEqual(new_email, u.get_profile().email)
+
+
+class AnnotationsTest(TestCase):
+    fixtures = ['test_data.json','map_data.json']
+    c = Client()
+
+    def setUp(self):
+        self.bobby = User.objects.get(username='bobby')
+        self.admin = User.objects.get(username='admin')
+        admin_map = Map.objects.create(owner=self.admin, zoom=1, center_x=0, center_y=0, title='map1')
+        # have to use a 'dummy' map to create the appropriate JSON
+        dummy = Map.objects.get(id=admin_map.id)
+        dummy.id += 1
+        dummy.save()
+        self.dummy = dummy
+
+    def make_annotations(self, mapobj, cnt=100):
+        for a in xrange(cnt):
+            Annotation.objects.create(title='ann%s' % a, map=mapobj).save()
+
+    def test_get(self):
+        '''make 100 annotations and get them all as well as paging through'''
+        self.make_annotations(self.dummy)
+
+        response = self.c.get(reverse('annotations',args=[self.dummy.id]))
+        rows = json.loads(response.content)
+        self.assertEqual(100, len(rows))
+
+        for p in range(4):
+            response = self.c.get(reverse('annotations',args=[self.dummy.id]) + "?page=%s" % p)
+            rows = json.loads(response.content)
+            self.assertEqual(25, len(rows))
+            # auto-increment id starts with 1
+            self.assertEqual(1 + (25 * p), rows[0]['id'])
+
+    def test_post(self):
+        '''test post operations'''
+
+        # make 1 and update it
+        self.make_annotations(self.dummy, 1)
+        ann = Annotation.objects.filter(map=self.dummy)[0]
+        data = json.dumps([{
+            "id" : ann.id,
+            "title" : "new title"
+        }])
+        # without login, expect failure
+        resp = self.c.post(reverse('annotations',args=[self.dummy.id]), data, "application/json")
+        self.assertEqual(403, resp.status_code)
+
+        # login and verify change accepted
+        self.c.login(username='admin',password='admin')
+        resp = self.c.post(reverse('annotations',args=[self.dummy.id]), data, "application/json")
+        ann = Annotation.objects.get(id=ann.id)
+        self.assertEqual(ann.title, "new title")
+
+        # now make a new one with a title
+        data = json.dumps([{
+            "title" : "new ann"
+        }])
+        resp = self.c.post(reverse('annotations',args=[self.dummy.id]), data, "application/json")
+        ann = Annotation.objects.get(id=ann.id + 1)
+        self.assertEqual(ann.title, "new ann")
+
+    def test_delete(self):
+        '''test delete operations'''
+
+        # make 10 annotations, drop 4-7
+        self.make_annotations(self.dummy, 10)
+        data = json.dumps(range(4,8))
+        # verify failure before login
+        resp = self.c.delete(reverse('annotations',args=[self.dummy.id]), data, "application/json")
+        self.assertEqual(403, resp.status_code)
+
+        # now check success
+        self.c.login(username='admin',password='admin')
+        resp = self.c.delete(reverse('annotations',args=[self.dummy.id]), data, "application/json")
+        # these are gone
+        ann = Annotation.objects.filter(id__in=range(4,8))
+        self.assertEqual(0, ann.count())
+        # six remain
+        ann = Annotation.objects.filter(map=self.dummy)
+        self.assertEqual(6, ann.count())
+
+    def test_csv(self):
+        '''test csv upload with update and insert'''
+
+        self.make_annotations(self.dummy, 2)
+        # first row is insert, second update (as it has an id)
+        csv = StringIO.StringIO(
+            "id,title,content\n"
+            '"",foo bar,blah\n'
+            "1,bar foo,halb"
+        )
+        csv.name = 'data.csv'
+        # verify failure before login
+        resp = self.c.post(reverse('annotations',args=[self.dummy.id]),{'csv':csv})
+        self.assertEqual(403, resp.status_code)
+
+        # login, rewind the buffer and verify
+        self.c.login(username='admin',password='admin')
+        csv.seek(0)
+        resp = self.c.post(reverse('annotations',args=[self.dummy.id]),{'csv':csv})
+        self.assertEqual("OK", resp.content)
+        ann = Annotation.objects.get(id=1)
+        self.assertEqual('bar foo', ann.title)
+        ann = Annotation.objects.get(id=3)
+        self.assertEqual('foo bar', ann.title)
+

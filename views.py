@@ -38,7 +38,9 @@ from django.contrib.contenttypes.models import ContentType
 from django.views.decorators.cache import cache_page
 
 from lxml import etree
+import csv
 from datetime import datetime
+import json
 import math
 import os
 import random
@@ -447,14 +449,71 @@ class SignupView(account.views.SignupView):
 
    form_class = CheckRegistrationForm
 
+
+def annotations(req, mapid):
+    '''management of annotations for a given mapid'''
+
+    cols = [ f.name for f in models.Annotation._meta.fields if f.name != 'map' ]
+
+    if req.method == 'GET':
+        mapobj = _resolve_object(req, models.Map, 'maps.view_map',
+                                 allow_owner=True, id=mapid)
+        ann = models.Annotation.objects.filter(map=mapid)
+        if bool(req.GET.get('in_map', False)):
+            ann = ann.filter(in_map=True)
+        if bool(req.GET.get('in_timeline', False)):
+            ann = ann.filter(in_timeline=True)
+        if 'page' in req.GET:
+            page = int(req.GET['page'])
+            page_size = 25
+            start = page * page_size
+            end = start + page_size
+            ann = ann[start:end]
+        if 'csv' in req.GET:
+            response = HttpResponse(mimetype='text/csv')
+            response['Content-Disposition'] = 'attachment; filename=map-%s-annotations.csv' % mapobj.id
+            writer = csv.writer(response)
+            writer.writerow(cols)
+            for a in ann:
+                writer.writerow([ getattr(a, c) for c in cols])
+            return response
+        rows = [ dict([ (c, getattr(a, c)) for c in cols]) for a in ann ]
+        return json_response(rows)
+
+    if req.method == 'POST':
+        mapobj = _resolve_object(req, models.Map, 'maps.change_map',
+                                 allow_owner=True, id=mapid)
+        # either a bulk upload or a JSON change
+        if req.FILES:
+            lines = iter(req.FILES.values()).next().read().split('\n')
+            data = csv.DictReader(lines)
+        else:
+            data = json.loads(req.body)
+        for r in data:
+            if 'id' in r and r['id']:
+                ann = models.Annotation.objects.get(map=mapobj, pk=r['id'])
+            else:
+                ann = models.Annotation(map=mapobj)
+            for c in cols:
+                if c in r and r[c]:
+                    setattr(ann, c, r[c])
+            ann.save()
+        return HttpResponse("OK")
+
+    elif req.method == 'DELETE':
+        mapobj = _resolve_object(req, models.Map, 'maps.change_map',
+                                 allow_owner=True, id=mapid)
+        data = json.loads(req.body)
+        models.Annotation.objects.filter(pk__in=data, map=mapobj).delete()
+        return HttpResponse("OK")
+
+
 @login_required
 def create_annotations_layer(req, mapid):
     '''Create an annotations layer with the predefined schema.
     
     @todo ugly hack - using existing view to allow this
     '''
-    from geonode.maps.views import _create_layer
-    
     mapobj = get_object_or_404(Map,pk=mapid)
     
     if req.method != 'POST':

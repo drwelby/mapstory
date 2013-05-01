@@ -434,8 +434,21 @@ class PublishingStatus(models.Model):
         obj.set_gen_level(AUTHENTICATED_USERS, level)
         obj.set_user_level(owner, obj.LEVEL_ADMIN)
         models.Model.save(self, *args)
-        
-        
+
+
+class Annotation(models.Model):
+
+    map = models.ForeignKey(Map)
+    title = models.TextField()
+    content = models.TextField(blank=True, null=True)
+    the_geom = models.TextField(blank=True, null=True)
+    start_time = models.BigIntegerField(blank=True, null=True)
+    end_time = models.BigIntegerField(blank=True, null=True)
+    in_map = models.BooleanField()
+    in_timeline = models.BooleanField()
+    appearance = models.TextField(blank=True, null=True)
+
+
 def audit_layer_metadata(layer):
     '''determine if metadata is complete to allow publishing'''
     return all([
