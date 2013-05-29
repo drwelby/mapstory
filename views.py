@@ -484,11 +484,19 @@ def annotations(req, mapid):
         mapobj = _resolve_object(req, models.Map, 'maps.change_map',
                                  allow_owner=True, id=mapid)
         # either a bulk upload or a JSON change
+        action = 'upsert'
         if req.FILES:
             lines = iter(req.FILES.values()).next().read().split('\n')
             data = csv.DictReader(lines)
         else:
             data = json.loads(req.body)
+            if isinstance(data, dict):
+                action = data.get('action', action)
+
+        if action == 'delete':
+            models.Annotation.objects.filter(pk__in=data['ids'], map=mapobj).delete()
+            return HttpResponse("OK")
+
         for r in data:
             if 'id' in r and r['id']:
                 ann = models.Annotation.objects.get(map=mapobj, pk=r['id'])
@@ -500,12 +508,7 @@ def annotations(req, mapid):
             ann.save()
         return HttpResponse("OK")
 
-    elif req.method == 'DELETE':
-        mapobj = _resolve_object(req, models.Map, 'maps.change_map',
-                                 allow_owner=True, id=mapid)
-        data = json.loads(req.body)
-        models.Annotation.objects.filter(pk__in=data, map=mapobj).delete()
-        return HttpResponse("OK")
+    return HttpResponse(status=400)
 
 
 @login_required

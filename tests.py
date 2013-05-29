@@ -346,14 +346,14 @@ class AnnotationsTest(TestCase):
 
         # make 10 annotations, drop 4-7
         self.make_annotations(self.dummy, 10)
-        data = json.dumps(range(4,8))
+        data = json.dumps({'action':'delete', 'ids':range(4,8)})
         # verify failure before login
-        resp = self.c.delete(reverse('annotations',args=[self.dummy.id]), data, "application/json")
+        resp = self.c.post(reverse('annotations',args=[self.dummy.id]), data, "application/json")
         self.assertEqual(403, resp.status_code)
 
         # now check success
         self.c.login(username='admin',password='admin')
-        resp = self.c.delete(reverse('annotations',args=[self.dummy.id]), data, "application/json")
+        resp = self.c.post(reverse('annotations',args=[self.dummy.id]), data, "application/json")
         # these are gone
         ann = Annotation.objects.filter(id__in=range(4,8))
         self.assertEqual(0, ann.count())
