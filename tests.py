@@ -321,7 +321,8 @@ class AnnotationsTest(TestCase):
         ann = Annotation.objects.filter(map=self.dummy)[0]
         data = json.dumps([{
             "id" : ann.id,
-            "title" : "new title"
+            "title" : "new title",
+            "the_geom" : '{ "type": "Point", "coordinates": [ 5.000000, 23.000000 ] }'
         }])
         # without login, expect failure
         resp = self.c.post(reverse('annotations',args=[self.dummy.id]), data, "application/json")
@@ -332,6 +333,8 @@ class AnnotationsTest(TestCase):
         resp = self.c.post(reverse('annotations',args=[self.dummy.id]), data, "application/json")
         ann = Annotation.objects.get(id=ann.id)
         self.assertEqual(ann.title, "new title")
+        self.assertEqual(ann.the_geom.x, 5)
+        self.assertEqual(ann.the_geom.y, 23)
 
         # now make a new one with a title
         data = json.dumps([{

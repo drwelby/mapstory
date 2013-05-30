@@ -25,6 +25,7 @@ from django.core.paginator import EmptyPage
 from django.core.exceptions import PermissionDenied
 from django.core.urlresolvers import reverse
 from django.conf import settings
+from django.contrib.gis.geos import GEOSGeometry
 from django.db.models import signals
 from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_POST
@@ -453,7 +454,7 @@ class SignupView(account.views.SignupView):
 def annotations(req, mapid):
     '''management of annotations for a given mapid'''
 
-    cols = [ f.name for f in models.Annotation._meta.fields if f.name != 'map' ]
+    cols = [ f.name for f in models.Annotation._meta.fields if f.name not in ('map','the_geom') ]
 
     if req.method == 'GET':
         mapobj = _resolve_object(req, models.Map, 'maps.view_map',
@@ -502,6 +503,9 @@ def annotations(req, mapid):
                 ann = models.Annotation.objects.get(map=mapobj, pk=r['id'])
             else:
                 ann = models.Annotation(map=mapobj)
+            if 'the_geom' in r:
+                ann.the_geom = GEOSGeometry(r['the_geom'])
+            # @todo we should support lat/lon columns for ingest of CSV
             for c in cols:
                 if c in r and r[c]:
                     setattr(ann, c, r[c])

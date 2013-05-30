@@ -438,6 +438,7 @@ class PublishingStatus(models.Model):
 
 
 class Annotation(models.Model):
+    objects = gis.GeoManager()
 
     map = models.ForeignKey(Map)
     title = models.TextField()
