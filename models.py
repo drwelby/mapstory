@@ -26,6 +26,7 @@ from geonode.core.models import AUTHENTICATED_USERS
 from geonode.core.models import ANONYMOUS_USERS
 from geonode.maps.models import Contact
 from geonode.maps.models import Map
+from geonode.maps.models import map_copied_signal
 from geonode.maps.models import Layer
 from geonode.maps.models import LayerManager
 from geonode.upload.signals import upload_complete
@@ -437,8 +438,20 @@ class PublishingStatus(models.Model):
         models.Model.save(self, *args)
 
 
+class AnnotationManager(gis.GeoManager):
+    
+    def copy_map_annotations(self, target, source_id):
+        source = Map.objects.get(id=source_id)
+        copies = []
+        for ann in source.annotation_set.all():
+            ann.map = target
+            ann.pk = None
+            copies.append(ann)
+        Annotation.objects.bulk_create(copies)
+
+
 class Annotation(models.Model):
-    objects = gis.GeoManager()
+    objects = AnnotationManager()
 
     map = models.ForeignKey(Map)
     title = models.TextField()
@@ -517,6 +530,10 @@ def create_user_activity(sender, instance, created, **kw):
         UserActivity.objects.create(user=instance)
 
 
+def map_copied(new_map, source_id, **kw):
+    Annotation.objects.copy_map_annotations(new_map, source_id)
+
+
 def audit_profile(sender, user, avatar, **kw):
     user.get_profile().update_audit()
 
@@ -541,6 +558,8 @@ upload_complete.connect(set_publishing_private, sender=None)
 upload_complete.connect(configure_gwc, sender=None)
 # @annoyatron2 - after map is saved, set_default_permissions is called - hack this
 Map.set_default_permissions = lambda s: None
+
+map_copied_signal.connect(map_copied)
 
 # ensure hit count records are created up-front
 signals.post_save.connect(create_hitcount, sender=Map)

@@ -298,6 +298,21 @@ class AnnotationsTest(TestCase):
         for a in xrange(cnt):
             Annotation.objects.create(title='ann%s' % a, map=mapobj).save()
 
+    def test_copy_annotations(self):
+        self.make_annotations(self.dummy)
+
+        admin_map = Map.objects.create(owner=self.admin, zoom=1, center_x=0, center_y=0, title='map2')
+        # have to use a 'dummy' map to create the appropriate JSON
+        target = Map.objects.get(id=admin_map.id)
+        target.id += 1
+        target.save()
+
+        Annotation.objects.copy_map_annotations(target, self.dummy.id)
+        # make sure we have 100 and we can resolve the corresponding copies
+        self.assertEqual(100, target.annotation_set.count())
+        for a in self.dummy.annotation_set.all():
+            self.assertTrue(target.annotation_set.get(title=a.title))
+
     def test_get(self):
         '''make 100 annotations and get them all as well as paging through'''
         self.make_annotations(self.dummy)
