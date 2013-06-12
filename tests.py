@@ -296,7 +296,7 @@ class AnnotationsTest(TestCase):
 
     def make_annotations(self, mapobj, cnt=100):
         for a in xrange(cnt):
-            Annotation.objects.create(title='ann%s' % a, map=mapobj).save()
+            Annotation.objects.create(title='ann%s' % a, map=mapobj, the_geom='POINT(5 23)').save()
 
     def test_copy_annotations(self):
         self.make_annotations(self.dummy)
@@ -318,15 +318,15 @@ class AnnotationsTest(TestCase):
         self.make_annotations(self.dummy)
 
         response = self.c.get(reverse('annotations',args=[self.dummy.id]))
-        rows = json.loads(response.content)
+        rows = json.loads(response.content)['features']
         self.assertEqual(100, len(rows))
 
         for p in range(4):
             response = self.c.get(reverse('annotations',args=[self.dummy.id]) + "?page=%s" % p)
-            rows = json.loads(response.content)
+            rows = json.loads(response.content)['features']
             self.assertEqual(25, len(rows))
             # auto-increment id starts with 1
-            self.assertEqual(1 + (25 * p), rows[0]['id'])
+            self.assertEqual(1 + (25 * p), rows[0]['properties']['id'])
 
     def test_post(self):
         '''test post operations'''
@@ -334,11 +334,15 @@ class AnnotationsTest(TestCase):
         # make 1 and update it
         self.make_annotations(self.dummy, 1)
         ann = Annotation.objects.filter(map=self.dummy)[0]
-        data = json.dumps([{
-            "id" : ann.id,
-            "title" : "new title",
-            "the_geom" : '{ "type": "Point", "coordinates": [ 5.000000, 23.000000 ] }'
-        }])
+        data = json.dumps({
+            'features' : [{
+                'geometry' : {'type' : 'Point', 'coordinates' : [ 5.000000, 23.000000 ]},
+                'properties' : {
+                    "id" : ann.id,
+                    "title" : "new title",
+                }
+            }]
+        })
         # without login, expect failure
         resp = self.c.post(reverse('annotations',args=[self.dummy.id]), data, "application/json")
         self.assertEqual(403, resp.status_code)
@@ -352,9 +356,13 @@ class AnnotationsTest(TestCase):
         self.assertEqual(ann.the_geom.y, 23)
 
         # now make a new one with a title
-        data = json.dumps([{
-            "title" : "new ann"
-        }])
+        data = json.dumps({
+            'features' : [{
+                'properties' : {
+                    "title" : "new ann",
+                }
+            }]
+        })
         resp = self.c.post(reverse('annotations',args=[self.dummy.id]), data, "application/json")
         ann = Annotation.objects.get(id=ann.id + 1)
         self.assertEqual(ann.title, "new ann")
@@ -385,9 +393,9 @@ class AnnotationsTest(TestCase):
         self.make_annotations(self.dummy, 2)
         # first row is insert, second update (as it has an id)
         csv = StringIO.StringIO(
-            "id,title,content\n"
-            '"",foo bar,blah\n'
-            "1,bar foo,halb"
+            "id,title,content,lat,lon\n"
+            '"",foo bar,blah,5,10\n'
+            "1,bar foo,halb,10,20"
         )
         csv.name = 'data.csv'
         # verify failure before login
@@ -401,6 +409,8 @@ class AnnotationsTest(TestCase):
         self.assertEqual("OK", resp.content)
         ann = Annotation.objects.get(id=1)
         self.assertEqual('bar foo', ann.title)
+        self.assertEqual(ann.the_geom.x, 20.)
         ann = Annotation.objects.get(id=3)
         self.assertEqual('foo bar', ann.title)
+        self.assertEqual(ann.the_geom.x, 10.)
 

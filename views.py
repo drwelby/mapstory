@@ -19,6 +19,7 @@ from dialogos.models import Comment
 
 from django.contrib.auth.models import User
 from django.contrib.sites.models import Site
+from django.core import serializers
 from django.core.cache import cache
 from django.core.paginator import Paginator
 from django.core.paginator import EmptyPage
@@ -26,6 +27,7 @@ from django.core.exceptions import PermissionDenied
 from django.core.urlresolvers import reverse
 from django.conf import settings
 from django.contrib.gis.geos import GEOSGeometry
+from django.contrib.gis.geos import Point
 from django.db.models import signals
 from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_POST
@@ -37,6 +39,8 @@ from django.template import RequestContext
 from django.template import loader
 from django.contrib.contenttypes.models import ContentType
 from django.views.decorators.cache import cache_page
+
+from vectorformats.Formats import Django, GeoJSON
 
 from lxml import etree
 import csv
@@ -478,14 +482,17 @@ def annotations(req, mapid):
             for a in ann:
                 writer.writerow([ getattr(a, c) for c in cols])
             return response
-        rows = [ dict([ (c, getattr(a, c)) for c in cols]) for a in ann ]
-        return json_response(rows)
+        decoder = Django.Django(geodjango="the_geom", properties=cols)
+        geojson = GeoJSON.GeoJSON().encode(decoder.decode(ann))
+        return json_response(geojson)
 
     if req.method == 'POST':
         mapobj = _resolve_object(req, models.Map, 'maps.change_map',
                                  allow_owner=True, id=mapid)
         # either a bulk upload or a JSON change
         action = 'upsert'
+        get_props = lambda r: r
+
         if req.FILES:
             lines = iter(req.FILES.values()).next().read().split('\n')
             data = csv.DictReader(lines)
@@ -493,22 +500,29 @@ def annotations(req, mapid):
             data = json.loads(req.body)
             if isinstance(data, dict):
                 action = data.get('action', action)
+            if 'features' in data:
+                data = data.get('features')
+                get_props = lambda r: r['properties']
 
         if action == 'delete':
             models.Annotation.objects.filter(pk__in=data['ids'], map=mapobj).delete()
             return HttpResponse("OK")
 
         for r in data:
-            if 'id' in r and r['id']:
-                ann = models.Annotation.objects.get(map=mapobj, pk=r['id'])
+            props = get_props(r)
+            if 'id' in props and props['id']:
+                ann = models.Annotation.objects.get(map=mapobj, pk=props['id'])
             else:
                 ann = models.Annotation(map=mapobj)
-            if 'the_geom' in r:
-                ann.the_geom = GEOSGeometry(r['the_geom'])
+            if 'geometry' in r:
+                # @todo - optimize me, round tripping json
+                ann.the_geom = GEOSGeometry(json.dumps(r['geometry']))
             # @todo we should support lat/lon columns for ingest of CSV
+            if 'lat' in r:
+                ann.the_geom = Point(float(r['lon']), float(r['lat']))
             for c in cols:
-                if c in r and r[c]:
-                    setattr(ann, c, r[c])
+                if c in props and props[c]:
+                    setattr(ann, c, props[c])
             ann.save()
         return HttpResponse("OK")
 
