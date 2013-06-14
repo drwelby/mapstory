@@ -7,6 +7,7 @@ from django.utils.safestring import mark_safe
 import hotshot
 import os
 import time
+import datetime
 import threading
 
 try:
@@ -25,7 +26,13 @@ def user():
 class GlobalRequestMiddleware(object):
     def process_request(self, request):
         current_request.request = request
-    
+
+
+_epoch = datetime.datetime.utcfromtimestamp(0)
+def datetime_to_seconds(dt):
+    delta = dt - _epoch
+    return delta.total_seconds()
+
 
 def render_manual(*path):
     paths = [settings.PROJECT_ROOT,'manual']

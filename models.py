@@ -1,3 +1,4 @@
+from datetime import datetime
 import random
 import operator
 import re
@@ -462,6 +463,17 @@ class Annotation(models.Model):
     in_timeline = models.BooleanField()
     in_map = models.BooleanField()
     appearance = models.TextField(blank=True, null=True)
+
+    def _timefmt(self, val):
+        return datetime.isoformat(datetime.utcfromtimestamp(val))
+
+    @property
+    def start_time_str(self):
+        return self._timefmt(self.start_time) if self.start_time else ''
+
+    @property
+    def end_time_str(self):
+        return self._timefmt(self.end_time) if self.end_time else ''
 
 
 def audit_layer_metadata(layer):

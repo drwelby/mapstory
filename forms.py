@@ -1,7 +1,12 @@
 from django import forms
+from django.contrib.gis.geos import Point
 from account.forms import SignupForm
 from geonode.maps.models import Layer
 from mapstory.models import ContactDetail
+from mapstory.models import Annotation
+from mapstory.util import datetime_to_seconds
+import datetime
+import json
 import taggit
 
 
@@ -101,3 +106,48 @@ class CheckRegistrationForm(SignupForm):
     def clean_not_human(self):
         if self.cleaned_data['not_human']:
             raise forms.ValidationError('')
+
+
+class AnnotationForm(forms.ModelForm):
+    def full_clean(self):
+        if 'geometry' in self.data:
+            # @todo - optimize me, round tripping json
+            self.data['the_geom'] = json.dumps(self.data['geometry'])
+        if 'lat' in self.data:
+            self.data['the_geom'] = Point(float(self.data['lon']), float(self.data['lat']))
+        self._convert_time('start_time')
+        self._convert_time('end_time')
+        super(AnnotationForm, self).full_clean()
+
+    def _convert_time(self, key):
+        val = self.data.get(key, None)
+        if not val: return
+        numeric = None
+        try:
+            numeric = int(val)
+        except ValueError:
+            pass
+        if not numeric:
+            fmts = (
+                '%Y',
+                '%Y-%m',
+                '%Y-%m-%d',
+                '%Y-%m-%dT%H:%M:%S',
+            )
+            parsed = None
+            for f in fmts:
+                try:
+                    parsed = datetime.datetime.strptime(val, f)
+                    break
+                except:
+                    pass
+            if parsed is None:
+                self._errors[key] = ['Unable to parse "%s"' % val]
+                return
+            numeric = int(datetime_to_seconds(parsed))
+
+        self.data[key] = str(numeric)
+
+
+    class Meta:
+        model = Annotation

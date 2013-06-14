@@ -10,6 +10,7 @@ from geoserver.catalog import ConflictingDataError
 from mapstory import models
 from mapstory.util import lazy_context
 from mapstory.util import render_manual
+from mapstory.forms import AnnotationForm
 from mapstory.forms import CheckRegistrationForm
 from mapstory.forms import StyleUploadForm
 from mapstory.forms import LayerForm
@@ -27,8 +28,8 @@ from django.core.exceptions import PermissionDenied
 from django.core.urlresolvers import reverse
 from django.conf import settings
 from django.contrib.gis.geos import GEOSGeometry
-from django.contrib.gis.geos import Point
 from django.db.models import signals
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.views.decorators.http import require_POST
 from django.contrib.auth.decorators import login_required
@@ -455,12 +456,13 @@ class SignupView(account.views.SignupView):
    form_class = CheckRegistrationForm
 
 
+@transaction.commit_on_success()
 def annotations(req, mapid):
     '''management of annotations for a given mapid'''
 
-    cols = [ f.name for f in models.Annotation._meta.fields if f.name not in ('map','the_geom') ]
-
     if req.method == 'GET':
+        cols = [ f.name for f in models.Annotation._meta.fields if f.name not in ('map','the_geom') ]
+
         mapobj = _resolve_object(req, models.Map, 'maps.view_map',
                                  allow_owner=True, id=mapid)
         ann = models.Annotation.objects.filter(map=mapid)
@@ -479,10 +481,17 @@ def annotations(req, mapid):
             response['Content-Disposition'] = 'attachment; filename=map-%s-annotations.csv' % mapobj.id
             writer = csv.writer(response)
             writer.writerow(cols)
+            sidx = cols.index('start_time')
+            eidx = cols.index('end_time')
             for a in ann:
-                writer.writerow([ getattr(a, c) for c in cols])
+                vals = [ getattr(a, c) for c in cols if c not in ('start_time','end_time')]
+                vals[sidx] = a.start_time_str
+                vals[eidx] = a.end_time_str
+                writer.writerow(vals)
             return response
-        decoder = Django.Django(geodjango="the_geom", properties=cols)
+        # strip the superfluous id, it will be added at the feature level
+        props = [ c for c in cols if c != 'id' ]
+        decoder = Django.Django(geodjango="the_geom", properties=props)
         geojson = GeoJSON.GeoJSON().encode(decoder.decode(ann))
         return json_response(geojson)
 
@@ -508,22 +517,24 @@ def annotations(req, mapid):
             models.Annotation.objects.filter(pk__in=data['ids'], map=mapobj).delete()
             return HttpResponse("OK")
 
-        for r in data:
+        errors = []
+        for i,r in enumerate(data):
             props = get_props(r)
-            if 'id' in props and props['id']:
-                ann = models.Annotation.objects.get(map=mapobj, pk=props['id'])
-            else:
-                ann = models.Annotation(map=mapobj)
+            props['map'] = mapobj.id
+            ann = None
+            id = r.get('id', None)
+            if id:
+                ann = models.Annotation.objects.get(map=mapobj, pk=id)
+
+            # form expects everything in the props, copy geometry in
             if 'geometry' in r:
-                # @todo - optimize me, round tripping json
-                ann.the_geom = GEOSGeometry(json.dumps(r['geometry']))
-            # @todo we should support lat/lon columns for ingest of CSV
-            if 'lat' in r:
-                ann.the_geom = Point(float(r['lon']), float(r['lat']))
-            for c in cols:
-                if c in props and props[c]:
-                    setattr(ann, c, props[c])
-            ann.save()
+                props['geometry'] = r['geometry']
+            form = AnnotationForm(props, instance=ann)
+            if not form.is_valid():
+                errors.append((i, form.errors))
+            else:
+                form.save()
+        # @todo deal with errors
         return HttpResponse("OK")
 
     return HttpResponse(status=400)

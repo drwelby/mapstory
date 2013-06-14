@@ -326,7 +326,7 @@ class AnnotationsTest(TestCase):
             rows = json.loads(response.content)['features']
             self.assertEqual(25, len(rows))
             # auto-increment id starts with 1
-            self.assertEqual(1 + (25 * p), rows[0]['properties']['id'])
+            self.assertEqual(1 + (25 * p), rows[0]['id'])
 
     def test_post(self):
         '''test post operations'''
@@ -337,9 +337,11 @@ class AnnotationsTest(TestCase):
         data = json.dumps({
             'features' : [{
                 'geometry' : {'type' : 'Point', 'coordinates' : [ 5.000000, 23.000000 ]},
+                "id" : ann.id,
                 'properties' : {
-                    "id" : ann.id,
                     "title" : "new title",
+                    "start_time" : "2001-01-01",
+                    "end_time" : 1371136048
                 }
             }]
         })
@@ -353,7 +355,8 @@ class AnnotationsTest(TestCase):
         ann = Annotation.objects.get(id=ann.id)
         self.assertEqual(ann.title, "new title")
         self.assertEqual(ann.the_geom.x, 5)
-        self.assertEqual(ann.the_geom.y, 23)
+        self.assertEqual(ann.end_time, 1371136048)
+        self.assertEqual(ann.start_time, 978307200)
 
         # now make a new one with a title
         data = json.dumps({
@@ -387,7 +390,7 @@ class AnnotationsTest(TestCase):
         ann = Annotation.objects.filter(map=self.dummy)
         self.assertEqual(6, ann.count())
 
-    def test_csv(self):
+    def test_csv_upload(self):
         '''test csv upload with update and insert'''
 
         self.make_annotations(self.dummy, 2)
@@ -413,4 +416,3 @@ class AnnotationsTest(TestCase):
         ann = Annotation.objects.get(id=3)
         self.assertEqual('foo bar', ann.title)
         self.assertEqual(ann.the_geom.x, 10.)
-
